@@ -1,5 +1,4 @@
 import { RESERVED_HANDLES, isValidHandle } from '@signet/types';
-import { isContractAddress } from './contract-address.ts';
 import { CONTRACT_TABS } from './contract-tabs.ts';
 
 /**
@@ -45,6 +44,21 @@ const CONTRACT_TAB_SEGMENTS = new Set(
 );
 
 /**
+ * Shape of a Soroban contract address: C-prefixed StrKey, 56 base32 chars.
+ *
+ * Deliberately NOT `isContractAddress` from `./contract-address.ts`: that
+ * validates the StrKey checksum via `@stellar/stellar-sdk`, which imports
+ * `node:crypto` — and this module is bundled into the middleware, which runs
+ * on the Edge runtime where native Node modules don't exist (importing it
+ * takes the whole site down, not just contract paths). The shape check is
+ * enough to decide *routing*; a well-shaped address with a bad checksum
+ * rewrites to the contract page, whose layout 404s it via the attribution
+ * check (`invalid` status) — the same "the page enforces existence" split
+ * the handle routes use.
+ */
+const CONTRACT_ADDRESS_SHAPE = /^C[A-Z2-7]{55}$/;
+
+/**
  * Extract the subdomain from a host header, or `null` when there isn't a
  * usable one (apex domain, bare `localhost`, or a `*.vercel.app` preview where
  * wildcard subdomains aren't available).
@@ -78,7 +92,7 @@ export function getSubdomain(host: string): string | null {
 function contractSuffix(segments: string[]): string | null {
   if (segments[0] !== 'contract') return null;
   const address = segments[1];
-  if (!address || !isContractAddress(address)) return null;
+  if (!address || !CONTRACT_ADDRESS_SHAPE.test(address)) return null;
   if (segments.length === 2) return `/contract/${address}`;
   const tab = segments[2];
   if (segments.length === 3 && tab && CONTRACT_TAB_SEGMENTS.has(tab)) {

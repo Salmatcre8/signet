@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { getSubdomain, resolveRewriteTarget } from './routing.ts';
 
 // Real testnet contract (verified on-chain in contract-address.test.ts).
@@ -94,6 +95,19 @@ test('contract paths with a bad address, unknown tab or extra depth pass through
   assert.equal(resolveRewriteTarget('alice.signet.dev', '/contract'), null);
 });
 
+test('a well-shaped address routes without checksum validation — the page 404s fakes', () => {
+  // Routing checks only the StrKey SHAPE (C + 55 base32 chars). Full checksum
+  // validation lives in contract-address.ts, which imports
+  // @stellar/stellar-sdk and node:crypto — neither loads on the Edge runtime
+  // this module is bundled into via the middleware. A well-shaped fake
+  // rewrites here and is 404d by the contract layout's attribution check.
+  const wellShapedFake = 'C' + 'A'.repeat(55);
+  assert.equal(
+    resolveRewriteTarget('alice.signet.dev', `/contract/${wellShapedFake}`),
+    `/p/alice/contract/${wellShapedFake}`,
+  );
+});
+
 // ---------------------------------------------------------------------------
 // Path-based fallback — pre-existing behaviour, pinned
 // ---------------------------------------------------------------------------
@@ -159,4 +173,24 @@ test('/@{handle} contract paths reject bad addresses, unknown tabs and other suf
   assert.equal(resolveRewriteTarget('signet.dev', '/@alice/contract/not-an-address'), null);
   assert.equal(resolveRewriteTarget('signet.dev', `/@alice/contract/${CONTRACT}/nope`), null);
   assert.equal(resolveRewriteTarget('signet.dev', '/@alice/anything-else'), null);
+});
+
+// ---------------------------------------------------------------------------
+// Edge-runtime safety
+// ---------------------------------------------------------------------------
+
+test('routing.ts never imports Node-only modules — it is bundled into the Edge middleware', () => {
+  // Importing contract-address.ts (StrKey checksum validation) from here once
+  // pulled @stellar/stellar-sdk and node:crypto into the middleware bundle,
+  // and the Edge runtime has no native modules: every request 500d, e2e
+  // caught it, and this pin keeps it caught at unit level.
+  const source = readFileSync(new URL('./routing.ts', import.meta.url), 'utf8');
+  // Match import statements, not prose — the file legitimately EXPLAINS the
+  // constraint in a comment that names the forbidden modules.
+  for (const forbidden of ["from './contract-address", "from 'node:", "from '@stellar/"]) {
+    assert.ok(
+      !source.includes(forbidden),
+      `routing.ts must not have an import ${forbidden}… — the middleware bundles it for the Edge runtime`,
+    );
+  }
 });
