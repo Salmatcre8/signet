@@ -377,7 +377,11 @@ mod tests {
         assert_eq!(put["type"], "result");
         assert_eq!(put["written"], 1);
 
-        let got = ledger_get(&ledger, &id(), &obj(json!({ "keys_xdr": [key_b64(1), key_b64(2)] })));
+        let got = ledger_get(
+            &ledger,
+            &id(),
+            &obj(json!({ "keys_xdr": [key_b64(1), key_b64(2)] })),
+        );
         assert_eq!(got["type"], "result");
         let entries = got["entries"].as_array().unwrap();
         assert_eq!(entries[0]["entry_xdr"], entry_b64(1, 10));

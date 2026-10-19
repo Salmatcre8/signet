@@ -97,11 +97,12 @@ pub enum Lookup {
 type KeyBytes = Vec<u8>;
 
 fn key_bytes(key: &LedgerKey) -> Result<KeyBytes, HostError> {
-    key.to_xdr(Limits::none())
-        .map_err(|_| HostError::from(soroban_env_host::Error::from_type_and_code(
+    key.to_xdr(Limits::none()).map_err(|_| {
+        HostError::from(soroban_env_host::Error::from_type_and_code(
             soroban_env_host::xdr::ScErrorType::Value,
             soroban_env_host::xdr::ScErrorCode::InvalidInput,
-        )))
+        ))
+    })
 }
 
 /// An entry written by [`LayeredStore::apply_modified`] or `ledger_put`.
@@ -323,8 +324,8 @@ impl SnapshotSource for LayeredStore {
 mod tests {
     use super::*;
     use soroban_env_host::xdr::{
-        ContractDataDurability, Hash, LedgerEntryData, LedgerEntryExt, LedgerKeyContractData,
-        ScAddress, ScVal, ContractDataEntry,
+        ContractDataDurability, ContractDataEntry, Hash, LedgerEntryData, LedgerEntryExt,
+        LedgerKeyContractData, ScAddress, ScVal,
     };
 
     /// A distinct contract-data key per `n`.
@@ -392,10 +393,14 @@ mod tests {
     #[test]
     fn overlay_precedence_is_session_then_override_then_base() {
         let mut store = LayeredStore::new(100);
-        store.insert_base(&key(1), entry(1, 10), Some(1_000), 42).unwrap();
+        store
+            .insert_base(&key(1), entry(1, 10), Some(1_000), 42)
+            .unwrap();
         assert_eq!(live_value(&store, 1), Some(10));
 
-        store.insert_override(&key(1), entry(1, 20), Some(1_000)).unwrap();
+        store
+            .insert_override(&key(1), entry(1, 20), Some(1_000))
+            .unwrap();
         assert_eq!(live_value(&store, 1), Some(20));
 
         store.apply_modified([write(1, 30)]).unwrap();
@@ -411,14 +416,18 @@ mod tests {
     #[test]
     fn a_tombstone_hides_a_lower_layer_without_touching_it() {
         let mut store = LayeredStore::new(100);
-        store.insert_base(&key(1), entry(1, 10), Some(1_000), 42).unwrap();
+        store
+            .insert_base(&key(1), entry(1, 10), Some(1_000), 42)
+            .unwrap();
         store.apply_modified([delete(1)]).unwrap();
         assert!(matches!(store.lookup(&key(1)).unwrap(), Lookup::Absent));
 
         // Rolling the session away brings the base entry back untouched.
         let cp = {
             let mut fresh = LayeredStore::new(100);
-            fresh.insert_base(&key(1), entry(1, 10), Some(1_000), 42).unwrap();
+            fresh
+                .insert_base(&key(1), entry(1, 10), Some(1_000), 42)
+                .unwrap();
             let cp = fresh.checkpoint();
             fresh.apply_modified([delete(1)]).unwrap();
             assert!(matches!(fresh.lookup(&key(1)).unwrap(), Lookup::Absent));
@@ -433,7 +442,9 @@ mod tests {
     fn rollback_restores_byte_identical_state_and_keeps_the_checkpoint_valid() {
         let mut store = LayeredStore::new(100);
         for n in 0..8 {
-            store.insert_base(&key(n), entry(n, n), Some(1_000), 42).unwrap();
+            store
+                .insert_base(&key(n), entry(n, n), Some(1_000), 42)
+                .unwrap();
         }
         store.apply_modified([write(2, 222)]).unwrap();
         let before = snapshot_bytes(&store, 10);
@@ -456,7 +467,9 @@ mod tests {
     #[test]
     fn ten_thousand_checkpoints_store_only_their_changes() {
         let mut store = LayeredStore::new(100);
-        store.insert_base(&key(0), entry(0, 0), Some(1_000_000), 42).unwrap();
+        store
+            .insert_base(&key(0), entry(0, 0), Some(1_000_000), 42)
+            .unwrap();
 
         for n in 0..10_000u32 {
             store.apply_modified([write(n % 16, n)]).unwrap();
@@ -473,11 +486,20 @@ mod tests {
     #[test]
     fn an_entry_past_its_live_until_reads_as_archived() {
         let mut store = LayeredStore::new(100);
-        store.insert_base(&key(1), entry(1, 10), Some(100), 42).unwrap();
-        assert!(matches!(store.lookup(&key(1)).unwrap(), Lookup::Live { .. }));
+        store
+            .insert_base(&key(1), entry(1, 10), Some(100), 42)
+            .unwrap();
+        assert!(matches!(
+            store.lookup(&key(1)).unwrap(),
+            Lookup::Live { .. }
+        ));
 
         store.set_sequence(101);
-        let Lookup::Archived { live_until, provenance } = store.lookup(&key(1)).unwrap() else {
+        let Lookup::Archived {
+            live_until,
+            provenance,
+        } = store.lookup(&key(1)).unwrap()
+        else {
             panic!("expected archived");
         };
         assert_eq!(live_until, 100);
@@ -490,32 +512,53 @@ mod tests {
 
         // A TTL extension applied from a simulate result revives it.
         store
-            .apply_modified([Write { key: key(1), entry: Some(entry(1, 10)), live_until: Some(200) }])
+            .apply_modified([Write {
+                key: key(1),
+                entry: Some(entry(1, 10)),
+                live_until: Some(200),
+            }])
             .unwrap();
-        assert!(matches!(store.lookup(&key(1)).unwrap(), Lookup::Live { .. }));
+        assert!(matches!(
+            store.lookup(&key(1)).unwrap(),
+            Lookup::Live { .. }
+        ));
     }
 
     #[test]
     fn provenance_names_the_layer_and_its_ledgers() {
         let mut store = LayeredStore::new(100);
-        store.insert_base(&key(1), entry(1, 1), Some(1_000), 42).unwrap();
-        store.insert_override(&key(2), entry(2, 2), Some(1_000)).unwrap();
+        store
+            .insert_base(&key(1), entry(1, 1), Some(1_000), 42)
+            .unwrap();
+        store
+            .insert_override(&key(2), entry(2, 2), Some(1_000))
+            .unwrap();
         store.set_sequence(105);
         store.apply_modified([write(3, 3)]).unwrap();
 
-        let Lookup::Live { provenance: fork, .. } = store.lookup(&key(1)).unwrap() else {
+        let Lookup::Live {
+            provenance: fork, ..
+        } = store.lookup(&key(1)).unwrap()
+        else {
             panic!()
         };
         assert_eq!(fork.source, Source::Fork);
         assert_eq!(fork.fetched_at_ledger, Some(42));
 
-        let Lookup::Live { provenance: over, .. } = store.lookup(&key(2)).unwrap() else {
+        let Lookup::Live {
+            provenance: over, ..
+        } = store.lookup(&key(2)).unwrap()
+        else {
             panic!()
         };
         assert_eq!(over.source, Source::Override);
         assert_eq!(over.fetched_at_ledger, None);
 
-        let Lookup::Live { provenance: session, .. } = store.lookup(&key(3)).unwrap() else {
+        let Lookup::Live {
+            provenance: session,
+            ..
+        } = store.lookup(&key(3)).unwrap()
+        else {
             panic!()
         };
         assert_eq!(session.source, Source::Session);
